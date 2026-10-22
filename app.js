@@ -3,6 +3,9 @@
 import { Muxer, ArrayBufferTarget } from './vendor/mp4-muxer.esm.js';
 
 const $ = id => document.getElementById(id);
+$('tabMp4').onclick=()=>switchTab('mp4');
+$('tabPng').onclick=()=>switchTab('png');
+function switchTab(tab){$('mp4Panel').hidden=tab!=='mp4';$('pngPanel').hidden=tab!=='png';for(const id of ['Mp4','Png']){$('tab'+id).classList.toggle('active',id.toLowerCase()===tab);$('tab'+id).setAttribute('aria-selected',String(id.toLowerCase()===tab));}if(tab==='png')stop();}
 let frames = [], playing = false, playToken = 0, playIndex = 0, exporting = false;
 let userOrdered = false;      // 사용자가 수동으로 순서를 바꿨는지(이후 추가 파일은 뒤에 붙임)
 let dragFrom = null;          // 목록 내부 드래그 중인 프레임 인덱스
