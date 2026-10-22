@@ -7,15 +7,15 @@ function loadVideo(file){
  if(!file||!(file.type.startsWith('video/')||/\.(mp4|webm|mov|m4v|ogg)$/i.test(file.name))){setStatus('지원되는 영상 파일을 선택하세요.');return;}
  if(videoURL)URL.revokeObjectURL(videoURL);
  videoFile=file;videoURL=URL.createObjectURL(file);
- video.src=videoURL;video.load();resetPreview();$p('pngPreview').disabled=true;
+ video.src=videoURL;video.load();resetPreview();$p('pngPreview').disabled=false;
  setStatus('영상 정보를 읽는 중…');
 }
 video.addEventListener('loadedmetadata',()=>{
  const d=video.duration;
- if(!Number.isFinite(d)||d<=0){setStatus('영상 길이를 읽을 수 없습니다.');return;}
+ if(!Number.isFinite(d)||d<=0){setStatus('영상 길이를 읽을 수 없습니다. 다른 영상을 선택해 주세요.');return;}
  $p('pngStart').value=0;$p('pngEnd').value=Math.round(d*1000);$p('pngPreview').disabled=false;refreshInfo();setStatus('추출 준비 완료');
 });
-video.addEventListener('error',()=>setStatus('브라우저에서 영상을 재생할 수 없습니다. 다른 형식으로 변환 후 시도하세요.'));
+video.addEventListener('error',()=>{setStatus('브라우저에서 영상을 재생할 수 없습니다. MP4(H.264) 또는 WEBM 영상으로 변환 후 시도하세요.');$p('pngPreview').disabled=false;});
 function timestamps(){
  const full=Math.round(video.duration*1000),start=Number($p('pngStart').value),end=Number($p('pngEnd').value),step=Number($p('pngInterval').value);
  if(![start,end,step].every(Number.isSafeInteger)||start<0||end>full||end<=start||step<1)throw Error('시작/종료/간격을 올바른 정수 ms로 입력하세요.');
@@ -89,10 +89,16 @@ function renderReview(){
 $p('pngExclude').onclick=()=>{if(selectedIndex<0)return;extracted[selectedIndex].excluded=!extracted[selectedIndex].excluded;renderReview();};
 $p('pngRestore').onclick=()=>{extracted.forEach(f=>f.excluded=false);selectedIndex=-1;renderReview();};
 $p('pngPreview').onclick=async()=>{
- if(busy||!videoFile)return;
+ if(busy)return;
+ if(!videoFile){setStatus('먼저 영상을 업로드해 주세요.');return;}
  busy=true;$p('pngPreview').disabled=true;$p('pngExport').disabled=true;
  $p('pngProgress').hidden=false;$p('pngProgress').value=0;
  try{
+  if(video.readyState<2){
+   setStatus('영상 프레임을 불러오는 중…');
+   await new Promise((resolve,reject)=>{const timeout=setTimeout(()=>{cleanup();reject(Error('영상 로딩 시간이 초과되었습니다. 코덱을 확인해 주세요.'));},15000);const cleanup=()=>{clearTimeout(timeout);video.removeEventListener('loadeddata',ok);video.removeEventListener('error',fail);};const ok=()=>{cleanup();resolve();};const fail=()=>{cleanup();reject(Error('영상 디코딩에 실패했습니다.'));};video.addEventListener('loadeddata',ok,{once:true});video.addEventListener('error',fail,{once:true});if(video.readyState>=2)ok();});
+  }
+  if(!Number.isFinite(video.duration)||video.duration<=0)throw Error('영상 길이를 확인할 수 없습니다.');
   const times=timestamps();resetPreview();video.pause();
   const canvas=document.createElement('canvas');canvas.width=video.videoWidth;canvas.height=video.videoHeight;
   if(!canvas.width||!canvas.height)throw Error('영상 해상도를 확인할 수 없습니다.');
@@ -107,7 +113,7 @@ $p('pngPreview').onclick=async()=>{
   }
   selectedIndex=0;renderReview();setStatus('미리보기 완료 · 제외할 프레임을 선택한 뒤 ZIP을 다운로드하세요.');
  }catch(e){resetPreview();setStatus('오류: '+e.message);}
- finally{busy=false;$p('pngPreview').disabled=!videoFile;}
+ finally{busy=false;$p('pngPreview').disabled=false;}
 };
 $p('pngExport').onclick=async()=>{
  if(busy||!extracted.length)return;
