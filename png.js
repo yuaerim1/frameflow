@@ -73,21 +73,22 @@ function renderReview(){
  $p('pngReview').hidden=false;
  const thumbs=$p('pngThumbs');thumbs.replaceChildren();
  extracted.forEach((f,i)=>{
-  const b=document.createElement('button');b.type='button';b.className='png-thumb'+(f.excluded?' excluded':'')+(selectedIndex===i?' selected':'');
-  const im=document.createElement('img');im.src=f.url;im.alt=f.ms+'ms 프레임';
-  const label=document.createElement('span');label.textContent=f.ms+'ms';
-  b.append(im,label);b.onclick=()=>{selectedIndex=i;renderReview();};thumbs.append(b);
+  const card=document.createElement('div');card.className='png-thumb'+(f.excluded?' excluded':'');
+  const imageBox=document.createElement('div');imageBox.className='png-thumb-image';
+  const im=document.createElement('img');im.src=f.url;im.alt=f.ms+'ms 프레임';im.loading='lazy';
+  const toggle=document.createElement('button');toggle.type='button';toggle.className='png-thumb-toggle';
+  toggle.textContent=f.excluded?'↺':'×';toggle.title=f.excluded?'프레임 다시 포함':'ZIP에서 프레임 제외';
+  toggle.setAttribute('aria-label',f.ms+'ms '+(f.excluded?'복원':'제외'));
+  toggle.onclick=()=>{f.excluded=!f.excluded;renderReview();};
+  const label=document.createElement('span');label.className='png-thumb-label';label.textContent=f.ms+'ms';
+  imageBox.append(im,toggle);card.append(imageBox,label);thumbs.append(card);
  });
  scroll.scrollTop=top;
  const included=extracted.filter(f=>!f.excluded).length;
  $p('pngCount').textContent=included+' / '+extracted.length+'장 포함';
- $p('pngSelection').textContent=selectedIndex<0?'프레임을 선택해 제외할 수 있습니다.':extracted[selectedIndex].ms+'ms · '+(extracted[selectedIndex].excluded?'제외됨':'포함됨');
- $p('pngExclude').disabled=selectedIndex<0;
- $p('pngExclude').textContent=selectedIndex>=0&&extracted[selectedIndex].excluded?'선택 프레임 복원':'선택 프레임 제외';
  $p('pngExport').disabled=included===0;
 }
-$p('pngExclude').onclick=()=>{if(selectedIndex<0)return;extracted[selectedIndex].excluded=!extracted[selectedIndex].excluded;renderReview();};
-$p('pngRestore').onclick=()=>{extracted.forEach(f=>f.excluded=false);selectedIndex=-1;renderReview();};
+$p('pngRestore').onclick=()=>{extracted.forEach(f=>f.excluded=false);renderReview();};
 $p('pngPreview').onclick=async()=>{
  if(busy)return;
  if(!videoFile){setStatus('먼저 영상을 업로드해 주세요.');return;}
@@ -111,7 +112,7 @@ $p('pngPreview').onclick=async()=>{
    $p('pngProgress').value=Math.round((i+1)/times.length*100);
    setStatus('미리보기 생성 중… '+(i+1)+' / '+times.length);
   }
-  selectedIndex=0;renderReview();setStatus('미리보기 완료 · 제외할 프레임을 선택한 뒤 ZIP을 다운로드하세요.');
+  renderReview();setStatus('미리보기 완료 · 각 이미지의 ×로 제외한 뒤 ZIP을 다운로드하세요.');
  }catch(e){resetPreview();setStatus('오류: '+e.message);}
  finally{busy=false;$p('pngPreview').disabled=false;}
 };
