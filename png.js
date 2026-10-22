@@ -1,5 +1,5 @@
 const $p=id=>document.getElementById(id);
-let videoURL=null,videoFile=null,busy=false;
+let videoURL=null,videoFile=null,busy=false, extracted=[], selectedIndex=-1;
 const video=$p('sourceVideo'),status=$p('pngStatus');
 function setStatus(s){status.textContent=s;}
 function loadVideo(file){
@@ -7,26 +7,26 @@ function loadVideo(file){
  if(!file||!(file.type.startsWith('video/')||/\.(mp4|webm|mov|m4v|ogg)$/i.test(file.name))){setStatus('지원되는 영상 파일을 선택하세요.');return;}
  if(videoURL)URL.revokeObjectURL(videoURL);
  videoFile=file;videoURL=URL.createObjectURL(file);
- video.src=videoURL;video.load();$p('pngExport').disabled=true;
+ video.src=videoURL;video.load();resetPreview();$p('pngPreview').disabled=true;
  setStatus('영상 정보를 읽는 중…');
 }
 video.addEventListener('loadedmetadata',()=>{
  const d=video.duration;
  if(!Number.isFinite(d)||d<=0){setStatus('영상 길이를 읽을 수 없습니다.');return;}
- $p('pngExport').disabled=false;refreshInfo();setStatus('추출 준비 완료');
+ $p('pngStart').value=0;$p('pngEnd').value=Math.round(d*1000);$p('pngPreview').disabled=false;refreshInfo();setStatus('추출 준비 완료');
 });
 video.addEventListener('error',()=>setStatus('브라우저에서 영상을 재생할 수 없습니다. 다른 형식으로 변환 후 시도하세요.'));
 function timestamps(){
- const ms=Math.round(video.duration*1000),step=Number($p('pngInterval').value);
- if(!Number.isSafeInteger(step)||step<1)throw Error('추출 간격은 1ms 이상의 정수여야 합니다.');
- const n=Math.ceil(ms/step);
- if(n>2000)throw Error('추출 이미지가 2,000장을 초과합니다. 간격을 늘려주세요.');
- const out=[];for(let i=0;i<n;i++)out.push(i*step);
- if(!out.length||out[out.length-1]!==ms)out.push(ms);
+ const full=Math.round(video.duration*1000),start=Number($p('pngStart').value),end=Number($p('pngEnd').value),step=Number($p('pngInterval').value);
+ if(![start,end,step].every(Number.isSafeInteger)||start<0||end>full||end<=start||step<1)throw Error('시작/종료/간격을 올바른 정수 ms로 입력하세요.');
+ const n=Math.ceil((end-start)/step);
+ if(n+1>2000)throw Error('추출 이미지가 2,000장을 초과합니다. 간격을 늘려주세요.');
+ const out=[];for(let i=0;i<n;i++)out.push(start+i*step);
+ if(out[out.length-1]!==end)out.push(end);
  return out;
 }
 function refreshInfo(){try{$p('pngInfo').textContent=video.readyState?('총 '+timestamps().length+'장 · '+Math.round(video.duration*1000)+'ms'):'';}catch(e){$p('pngInfo').textContent=e.message;}}
-$p('pngInterval').addEventListener('input',refreshInfo);
+for(const id of ['pngInterval','pngStart','pngEnd'])$p(id).addEventListener('input',()=>{resetPreview();refreshInfo();});
 $p('videoPick').onclick=()=>$p('videoFiles').click();
 $p('videoFiles').onchange=e=>{loadVideo(e.target.files[0]);e.target.value='';};
 const drop=$p('videoDrop');
@@ -62,28 +62,64 @@ function zipFiles(files){
  const end=new Uint8Array([...u32(0x06054b50),...u16(0),...u16(0),...u16(files.length),...u16(files.length),...u32(centerSize),...u32(offset),...u16(0)]);
  return new Blob([...chunks,...central,end],{type:'application/zip'});
 }
-$p('pngExport').onclick=async()=>{
+
+function resetPreview(){
+ for(const f of extracted)URL.revokeObjectURL(f.url);
+ extracted=[];selectedIndex=-1;
+ $p('pngReview').hidden=true;$p('pngThumbs').replaceChildren();$p('pngExport').disabled=true;
+}
+function renderReview(){
+ const scroll=$p('pngGrid'),top=scroll.scrollTop;
+ $p('pngReview').hidden=false;
+ const thumbs=$p('pngThumbs');thumbs.replaceChildren();
+ extracted.forEach((f,i)=>{
+  const b=document.createElement('button');b.type='button';b.className='png-thumb'+(f.excluded?' excluded':'')+(selectedIndex===i?' selected':'');
+  const im=document.createElement('img');im.src=f.url;im.alt=f.ms+'ms 프레임';
+  const label=document.createElement('span');label.textContent=f.ms+'ms';
+  b.append(im,label);b.onclick=()=>{selectedIndex=i;renderReview();};thumbs.append(b);
+ });
+ scroll.scrollTop=top;
+ const included=extracted.filter(f=>!f.excluded).length;
+ $p('pngCount').textContent=included+' / '+extracted.length+'장 포함';
+ $p('pngSelection').textContent=selectedIndex<0?'프레임을 선택해 제외할 수 있습니다.':extracted[selectedIndex].ms+'ms · '+(extracted[selectedIndex].excluded?'제외됨':'포함됨');
+ $p('pngExclude').disabled=selectedIndex<0;
+ $p('pngExclude').textContent=selectedIndex>=0&&extracted[selectedIndex].excluded?'선택 프레임 복원':'선택 프레임 제외';
+ $p('pngExport').disabled=included===0;
+}
+$p('pngExclude').onclick=()=>{if(selectedIndex<0)return;extracted[selectedIndex].excluded=!extracted[selectedIndex].excluded;renderReview();};
+$p('pngRestore').onclick=()=>{extracted.forEach(f=>f.excluded=false);selectedIndex=-1;renderReview();};
+$p('pngPreview').onclick=async()=>{
  if(busy||!videoFile)return;
- busy=true;$p('pngExport').disabled=true;$p('pngProgress').hidden=false;$p('pngProgress').value=0;
+ busy=true;$p('pngPreview').disabled=true;$p('pngExport').disabled=true;
+ $p('pngProgress').hidden=false;$p('pngProgress').value=0;
  try{
-  video.pause();const times=timestamps(),files=[];
+  const times=timestamps();resetPreview();video.pause();
   const canvas=document.createElement('canvas');canvas.width=video.videoWidth;canvas.height=video.videoHeight;
   if(!canvas.width||!canvas.height)throw Error('영상 해상도를 확인할 수 없습니다.');
   const ctx=canvas.getContext('2d');
   for(let i=0;i<times.length;i++){
-   const t=times[i];
-   await seek(t/1000);
+   await seek(times[i]/1000);
    ctx.drawImage(video,0,0,canvas.width,canvas.height);
    const blob=await new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(Error('PNG 생성 실패')),'image/png'));
-   files.push({name:String(i+1).padStart(4,'0')+'_'+String(t).padStart(7,'0')+'ms.png',data:new Uint8Array(await blob.arrayBuffer())});
-   $p('pngProgress').value=Math.round((i+1)/times.length*90);
-   setStatus('PNG 추출 중… '+(i+1)+' / '+times.length);
+   extracted.push({ms:times[i],blob,url:URL.createObjectURL(blob),excluded:false});
+   $p('pngProgress').value=Math.round((i+1)/times.length*100);
+   setStatus('미리보기 생성 중… '+(i+1)+' / '+times.length);
   }
+  selectedIndex=0;renderReview();setStatus('미리보기 완료 · 제외할 프레임을 선택한 뒤 ZIP을 다운로드하세요.');
+ }catch(e){resetPreview();setStatus('오류: '+e.message);}
+ finally{busy=false;$p('pngPreview').disabled=!videoFile;}
+};
+$p('pngExport').onclick=async()=>{
+ if(busy||!extracted.length)return;
+ const kept=extracted.filter(f=>!f.excluded);if(!kept.length)return;
+ busy=true;$p('pngExport').disabled=true;
+ try{
   setStatus('ZIP 생성 중…');
+  const files=[];
+  for(let i=0;i<kept.length;i++)files.push({name:String(i+1).padStart(4,'0')+'_'+String(kept[i].ms).padStart(7,'0')+'ms.png',data:new Uint8Array(await kept[i].blob.arrayBuffer())});
   const zip=zipFiles(files),url=URL.createObjectURL(zip),a=document.createElement('a');
   a.href=url;a.download=(videoFile.name.replace(/\.[^.]+$/,'')||'frames')+'_png.zip';document.body.append(a);a.click();a.remove();
-  setTimeout(()=>URL.revokeObjectURL(url),60000);
-  $p('pngProgress').value=100;setStatus('완료 · '+files.length+'장');
+  setTimeout(()=>URL.revokeObjectURL(url),60000);setStatus('ZIP 완료 · '+files.length+'장');
  }catch(e){setStatus('오류: '+e.message);}
- finally{busy=false;$p('pngExport').disabled=!videoFile;}
+ finally{busy=false;$p('pngExport').disabled=extracted.every(f=>f.excluded);}
 };
